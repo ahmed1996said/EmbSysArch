@@ -1,0 +1,67 @@
+switch(next_state){
+		
+				case S1:
+								if(previous_conversion == PRIORITY)
+									next_state = S2;
+								else if(previous_conversion==QUEUED_REQUEST)
+								next_state = S3;								
+				break;
+				
+								
+				case S2:
+					Control_HBLED();
+				  next_state = S4;
+				break;
+				
+				
+				case S3:
+						//enqueue result with channel number
+						result_status = osMessageQueuePut(results_queue_ID,&msg_converted,NULL,0);
+						next_state = S4;
+				break;
+	
+				
+				case S4:
+						queue_count = osMessageQueueGetCount(requests_queue_ID);			
+						if(queue_count==0){						//is requests queue empty?
+							previous_conversion = PRIORITY;     //update state
+							
+							//ensure adc is configuered for hw trigger from TPM:
+									ADC0->SC2 |= ADC_SC2_ADTRG(1);
+									// Select triggering by TPM0 Overflow
+									SIM->SOPT7 = SIM_SOPT7_ADC0TRGSEL(8) | SIM_SOPT7_ADC0ALTTRGEN_MASK;
+									// Select input channel 
+									ADC0->SC1[0] &= ~ADC_SC1_ADCH_MASK;
+									ADC0->SC1[0] |= ADC_SC1_ADCH(ADC_SENSE_CHANNEL);		
+							
+							    next_state = S1;
+						}
+						else 
+							next_state=S5;						
+				break;			
+			 
+						
+				case S5:
+					 // 1. Get the next message
+							result_status = osMessageQueueGet(requests_queue_ID,&msg_to_convert,NULL,0);
+							if(result_status != osOK)
+								break;
+					 // 2. Configure ADC to read that channel w/ SW triggering
+							ADC0->CFG1 = 0x9C; // 16 bit
+							ADC0->SC2 = 0; 											//software trigger
+
+					 // 3. Update state variable indicating its servicing a queued ADC conversion request
+				 	    previous_conversion = QUEUED_REQUEST;
+
+					 // 4. Start conversion with SW trigger
+						//	ADC0->SC1[0] = ADC_SC1_AIEN(1) | msg_to_convert.ChannelNum;
+									ADC0->SC1[0] &= ~ADC_SC1_ADCH_MASK;
+									ADC0->SC1[0] |= ADC_SC1_ADCH(msg_to_convert.ChannelNum);	
+
+							
+					    msg_converted.Result =  ADC0->R[0];
+					    msg_converted.ChannelNum = msg_to_convert.ChannelNum;
+							next_state = S1;
+							break;
+				
+				default: next_state=S1; break;
